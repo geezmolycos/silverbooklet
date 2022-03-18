@@ -1,0 +1,7 @@
+*.pdf
+*.py
+!utilities.py
+*.log
+*.aux
+*.synctex.gz
+__pycache__/

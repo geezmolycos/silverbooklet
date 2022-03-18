@@ -1,0 +1,507 @@
+
+import math
+import string
+import attr
+from frozendict import frozendict
+from collections import defaultdict
+
+from utilities import Vector2D
+
+def matrix2d_inverse(mati, matj) =
+    d * Vector2D(matj.y, -mati.y), d * Vector2D(-matj.x, mati.x) where:
+        d = 1 / mati.cross_product(matj)
+
+@attr.s(frozen=True)
+class Affine:
+    mati = attr.ib(default=Vector2D(1, 0))
+    matj = attr.ib(default=Vector2D(0, 1))
+    translation = attr.ib(default=Vector2D(0, 0))
+
+    @classmethod
+    def identity(cls):
+        return Affine(Vector2D(1, 0), Vector2D(0, 1), Vector2D(0, 0))
+
+    @classmethod
+    def from_translation(cls, transl) =
+        cls(translation=transl)
+
+    @classmethod
+    def from_rotation(cls, degrees) =
+        cls(
+            mati=Vector2D(math.cos(radians), math.sin(radians)),
+            matj=Vector2D(-math.sin(radians), math.cos(radians))
+        ) where:
+            radians = math.radians(degrees)
+    
+    @classmethod
+    def from_scale(cls, scale_vec) =
+        cls(
+            mati=Vector2D(scale_vec.x, 0),
+            matj=Vector2D(0, scale_vec.y)
+        )
+
+    def __mul__(self, other is Affine) =
+        type(self)(
+            self.mati.apply_matrix(other.mati, other.matj),
+            self.matj.apply_matrix(other.mati, other.matj),
+            self.translation.apply_matrix(other.mati, other.matj) + other.translation
+        )
+    
+    addpattern def __mul__(self, other is (int, float)) =
+        type(self)(
+            other * self.mati,
+            other * self.matj,
+            other * self.translation
+        )
+    
+    __rmul__ = __mul__
+
+    def apply_to(self, vector) = vector.affine_transform(self.mati, self.matj, self.translation)
+
+    def inverse(self) =
+        type(self)(mati, matj, transl) where:
+            mati, matj = matrix2d_inverse(self.mati, self.matj)
+            transl = -self.translation.apply_matrix(mati, matj)
+    
+    def det(self) =
+        self.mati.cross_product(self.matj)
+    
+    def bounding_box(self):
+        corners = ((0, 0), (1, 0), (0, 1), (1, 1)) |> starmap$(Vector2D)
+        applied = corners |> map$(self.apply_to)
+        l = min(applied |> map$(.x))
+        d = min(applied |> map$(.y))
+        r = max(applied |> map$(.x))
+        u = max(applied |> map$(.y))
+        return type(self)(Vector2D(r - l, 0), Vector2D(0, u - d), Vector2D(l, d))
+    
+    def center(self) = Vector2D(0.5, 0.5) |> self.apply_to
+    
+    def centered_transform(self, affine):
+        mirror_center = self.center()
+        return self * Affine(translation=-mirror_center) * affine * Affine(translation=mirror_center)
+
+
+@attr.s(frozen=True)
+class DoubleSidedPaper:
+    intrinsic_dim = attr.ib()
+    meta = attr.ib(factory=frozendict)
+
+    def to_region_placement(self) =
+        ((True, False)
+            |> map$(-> SidedPaperRegion(self, Affine.from_scale(self.intrinsic_dim), _))
+            |> map$(-> SidedPaperRegionPlacement(_, Affine.from_scale(self.intrinsic_dim), _.isfront))
+            |*> DoubleSidedPaperRegionPlacement
+        )
+
+@attr.s(frozen=True)
+class SidedPaperRegion:
+    paper = attr.ib()
+    affine = attr.ib()
+    isfront = attr.ib()
+    
+    def get_subregion(self, subregion) =
+        attr.evolve(self, affine=subregion * self.affine)
+
+@attr.s(frozen=True)
+class SidedPaperRegionPlacement:
+    paper_region = attr.ib()
+    placement_affine = attr.ib()
+    frontup = attr.ib()
+
+    def transform(self, affine) =
+        attr.evolve(self, placement_affine=self.placement_affine * affine)
+    
+    def keepfront_transform(self, affine) =
+        self.transform() |> attr.evolve$(?, frontup=affine.det() < 0)
+    
+    def calculate_subregion(self, region) =
+        self.paper_region.get_subregion(region * self.placement_affine.inverse())
+
+@attr.s(frozen=True)
+class DoubleSidedPaperRegionPlacement:
+    front = attr.ib()
+    back = attr.ib()
+
+    def transform(self, affine) =
+        attr.evolve(self, front=self.front.transform(affine), back=self.back.transform(affine))
+    
+    def keepfront_transform(self, affine) =
+        (if affine.det() < 0
+            then attr.evolve(self, front=self.back.transform(affine), back=self.front.transform(affine))
+            else attr.evolve(self, front=self.front.transform(affine), back=self.back.transform(affine))
+        )
+
+@attr.s(frozen=True)
+class PaperStack:
+    placement = attr.ib(factory=tuple)
+
+    def paper_eval(self, method, *args, **kwargs) =
+        attr.evolve(self, placement=self.placement |> map$(
+            -> (_. <| method)(*args, **kwargs)
+        ) |> tuple)
+    
+    def reverse_paper_order(self) =
+        attr.evolve(self, paper=self.paper |> reversed |> tuple)
+    
+    def transform(self, *args, **kwargs) = self.paper_eval("transform", *args, **kwargs)
+    
+    def keepfront_transform(self, *args, **kwargs) = self.paper_eval("keepfront_transform", *args, **kwargs)
+
+    def merge(self, other_stack, other_on_top=True) =
+        (if other_on_top
+            then attr.evolve(self, placement=other_stack.placement + self.placement)
+            else attr.evolve(self, placement=self.placement + other_stack.placement)
+        )
+    
+    def split(self, n) =
+        attr.evolve(self, placement=self.placement[:n]), attr.evolve(self, placement=self.placement[n:])
+
+@attr.s
+class PaperCuttingBasketManager:
+    raw = attr.ib(factory=-> defaultdict(PaperStack))
+
+    def __getitem__(self, key) = self.raw[key]
+    def __setitem__(self, key, value):
+        if key != "scrap":
+            self.raw[key] = value
+    
+    @property
+    def hand(self) = self["hand"]
+
+    @hand.setter
+    def hand(self, value):
+        self["hand"] = value
+
+@attr.s
+class PaperCuttingPageManager:
+    page_amount = attr.ib()
+    page_intrinsic_dim = attr.ib()
+    page_index = attr.ib(default=0)
+    prints = attr.ib(factory=dict)
+    print_affine = attr.ib(default=Affine.identity())
+    
+    def get_page_amount(self) = self.page_amount
+    def get_page_dim(self) = self.page_intrinsic_dim
+    def set_print_index(self, value):
+        self.page_index = value
+    def set_print_affine(self, affine):
+        self.print_affine = affine
+    
+    def print_consequent_side_to(self, paper_stack):
+        for piece in paper_stack.placement:
+            front = piece.front
+            printed_region = front.calculate_subregion(self.print_affine)
+            #print(front, self.print_affine, printed_region, sep="\n")
+            self.prints[self.page_index] = printed_region
+            self.page_index += 1
+    
+    def print_intervening_side_to(self, paper_stack):
+        for piece in paper_stack.placement:
+            front = piece.front
+            printed_region = front.calculate_subregion(self.print_affine)
+            self.prints[self.page_index] = printed_region
+            self.page_index += 2
+        
+    def print_double_side_to(self, paper_stack, mirror_x=False, mirror_y=False):
+        print_affine_front = print_affine_back = self.print_affine
+        if mirror_x:
+            print_affine_back |>= .centered_transform(Affine.from_scale(Vector2D(-1, 1)))
+        if mirror_y:
+            print_affine_back |>= .centered_transform(Affine.from_scale(Vector2D(1, -1)))
+        for piece in paper_stack.placement:
+            front = piece.front
+            back = piece.back
+            printed_region_front = front.calculate_subregion(print_affine_front)
+            printed_region_back = back.calculate_subregion(print_affine_back)
+            self.prints[self.page_index] = printed_region_front
+            self.page_index += 1
+            self.prints[self.page_index] = printed_region_back
+            self.page_index += 1
+
+@attr.s
+class PaperCuttingPaperManager:
+    new_paper_dim = attr.ib()
+    paper_index = attr.ib(default=0)
+    generated_paper = attr.ib(kw_only=True, factory=list)
+
+    def set_dim(self, dim):
+        self.new_paper_dim = dim
+    
+    def generate_n(self, n):
+        p = range(self.paper_index, self.paper_index + n) |> map$(
+            -> DoubleSidedPaper(self.new_paper_dim, meta=frozendict(index=_))
+        ) |> list
+        self.paper_index += n
+        self.generated_paper.extend(p)
+        return p
+        
+
+@attr.s
+class PaperCuttingProcessExecuter:
+    inst_list = attr.ib()
+    inst_pointer = attr.ib(default=0)
+    for_times = attr.ib(kw_only=True, factory=list)
+    for_current = attr.ib(kw_only=True, factory=list)
+    basket = attr.ib(kw_only=True, factory=PaperCuttingBasketManager)
+    op_stack = attr.ib(kw_only=True, factory=list)
+    memory = attr.ib(kw_only=True, factory=dict)
+    page_manager = attr.ib(kw_only=True, factory=PaperCuttingPageManager)
+    paper_manager = attr.ib(kw_only=True, factory=PaperCuttingPaperManager)
+
+    arith_cmds = {
+        "neg": (1, (float,), (-)),
+        "add": (2, (float, float), (+)),
+        "sub": (2, (float, float), (-)),
+        "mul": (2, (float, float), (*)),
+        "div": (2, (float, float), (/)),
+        "pow": (2, (float, float), (**)),
+        "abs": (1, (float,), abs),
+        "floor": (1, (float,), math.floor),
+        "ceil": (1, (float,), math.ceil),
+        "round": (1, (float,), round),
+        "eq": (2, (float, float), math.isclose ..> float),
+        "neq": (2, (float, float), math.isclose ..> (not) ..> float),
+        "gt": (2, (float, float), (>) ..> float),
+        "lt": (2, (float, float), (<) ..> float),
+        "not": (1, (float,), (not) ..> float),
+        "or": (2, (float, float), (or) ..> float),
+        "and": (2, (float, float), (and) ..> float),
+        "xor": (2, (float, float), (a, b) -> (bool(a), bool(b)) |*> (^) |> float),
+        "vec": (2, (float, float), Vector2D),
+        "upvec": (1, (Vector2D,), .tuple),
+        "affine": (3, (Vector2D, Vector2D, Vector2D), Affine),
+        "upaffine": (1, (Affine,), -> (_.mati, _.matj, _.translation)),
+        "affineinv": (1, (Affine,), .inverse()),
+        "rotate": (1, (float,), Affine.from_rotation),
+        "translate": (1, (Vector2D,), Affine.from_translation),
+        "scale": (1, (Vector2D,), Affine.from_scale),
+        "flipx": (0, (), -> Affine(Vector2D(-1, 0), Vector2D(0, 1), Vector2D(0, 0))),
+        "flipy": (0, (), -> Affine(Vector2D(1, 0), Vector2D(0, -1), Vector2D(0, 0))),
+        "affineidentity": (0, (), Affine.identity),
+    }
+
+    stack_cmds = {
+        "swap": ("ab", "ba"),
+        "dup": ("a", "aa"),
+        "over": ("ab", "aba"),
+        "rot": ("abc", "bca"),
+        "drop": ("a", ""),
+    }
+
+    self_cmds = {
+        "st": (def (self) ->
+            name is str = self.op_stack.pop();
+            thing = self.op_stack.pop();
+            self.memory[name] = thing),
+        "ld": (def (self) ->
+            name is str = self.op_stack.pop();
+            self.memory[name] |> self.op_stack.append),
+    }
+
+    class arg_cmds:
+
+        argc_paperdim = 1
+        type_paperdim = (Vector2D,)
+        def cmd_paperdim(self, vec):
+            self.paper_manager.set_dim(vec)
+        
+        argc_newpaper = 1
+        type_newpaper = (float,)
+        def cmd_newpaper(self, n):
+            n = int n
+            p = self.paper_manager.generate_n(n)
+            regions = p |> map$(.to_region_placement()) |> tuple
+            stack = PaperStack(regions)
+            self.basket.hand |>= .merge(stack, other_on_top=True)
+        
+        argc_takepaper = 2
+        type_takepaper = (str, float)
+        def cmd_takepaper(self, basket_name, quantity):
+            stack, rest = self.basket[basket_name].split(int quantity)
+            self.basket[basket_name] = rest
+            self.basket.hand |>= .merge(stack, other_on_top=True)
+        
+        argc_takeall = 1
+        type_takeall = (str,)
+        def cmd_takeall(self, basket_name):
+            stack, rest = self.basket[basket_name].split(None)
+            self.basket[basket_name] = rest
+            self.basket.hand |>= .merge(stack, other_on_top=True)
+        
+        argc_putpaper = 1
+        type_putpaper = (str,)
+        def cmd_putpaper(self, basket_name):
+            self.basket[basket_name] |>= .merge(self.basket.hand, other_on_top=True)
+            self.basket.hand = PaperStack()
+        
+        argc_swappaper = 1
+        type_swappaper = (str,)
+        def cmd_swappaper(self, basket_name):
+            self.basket[basket_name], self.basket.hand = self.basket.hand, self.basket[basket_name]
+        
+        argc_cut = 2
+        type_cut = (str, str)
+        def cmd_cut(self, b1, b2):
+            self.basket[b1] |>= .merge(self.basket.hand, other_on_top=True)
+            self.basket[b2] |>= .merge(self.basket.hand, other_on_top=True)
+            self.basket.hand = PaperStack()
+        
+        argc_reverse = 0
+        type_reverse = ()
+        def cmd_reverse(self):
+            self.basket.hand |>= .reverse_paper_order()
+        
+        argc_afftrans = 1
+        type_afftrans = (Affine,)
+        def cmd_afftrans(self, affine):
+            self.basket.hand |>= .transform(affine)
+        
+        argc_afftranskf = 1
+        type_afftranskf = (Affine,)
+        def cmd_afftranskf(self, affine):
+            self.basket.hand |>= .keepfront_transform(affine)
+        
+        argc_printaffine = 1
+        type_printaffine = (Affine,)
+        def cmd_printaffine(self, affine):
+            self.page_manager.set_print_affine(affine)
+        
+        argc_pageamount = 0
+        type_pageamount = ()
+        def cmd_pageamount(self):
+            self.page_manager.get_page_amount() |> self.op_stack.append
+        
+        argc_printidx = 1
+        type_printidx = (float,)
+        def cmd_printidx(self, n):
+            self.page_manager.set_print_index(int n)
+        
+        argc_pagedim = 0
+        type_pagedim = ()
+        def cmd_pagedim(self):
+            self.page_manager.get_page_dim() |> self.op_stack.append
+        
+        argc_print1 = 0
+        type_print1 = ()
+        def cmd_print1(self):
+            self.page_manager.print_consequent_side_to(self.basket.hand)
+        
+        argc_print2 = 0
+        type_print2 = ()
+        def cmd_print2(self):
+            self.page_manager.print_intervening_side_to(self.basket.hand)
+        
+        argc_printdblx = 0
+        type_printdblx = ()
+        def cmd_printdblx(self):
+            self.page_manager.print_double_side_to(self.basket.hand, mirror_x=True)
+
+        argc_printdbly = 0
+        type_printdbly = ()
+        def cmd_printdbly(self):
+            self.page_manager.print_double_side_to(self.basket.hand, mirror_y=True)
+
+        argc_countbasket = 1
+        type_countbasket = (str,)
+        def cmd_countbasket(self, basket_name):
+            self.basket[basket_name].raw |> len |> float |> self.op_stack.append
+
+    @property
+    def current_inst(self) = self.inst_list[self.inst_pointer]
+
+    def manip_stack(self, frm, to):
+        labels = {}
+        for ch in reversed(frm):
+            labels[ch] = self.op_stack.pop()
+        for ch in to:
+            self.op_stack.append(labels[ch])
+
+    def eval_cmd(self, cmd if cmd in self.arith_cmds):
+        arg_amount, arg_type, f = self.arith_cmds[cmd]
+        args = self.op_stack[-arg_amount:]
+        del self.op_stack[-arg_amount:]
+        if all(zip(args, arg_type) |> starmap$(isinstance)):
+            r = f(*args)
+            if r `isinstance` (tuple, list):
+                self.op_stack.extend(r)
+            else:
+                self.op_stack.append(r)
+        else:
+            raise ValueError(f"cmd {cmd}, incorrect type: {args} {arg_type}")
+    addpattern def eval_cmd(self, cmd if cmd in self.stack_cmds):
+        self.manip_stack(*self.stack_cmds[cmd])
+    addpattern def eval_cmd(self, "manip"):
+        a, b = self.op_stack.pop(), self.op_stack.pop()
+        self.manip_stack(b, a)
+    addpattern def eval_cmd(self, "rev"):
+        n = int(self.op_stack.pop())
+        self.op_stack[-n:] |>= reversed
+    addpattern def eval_cmd(self, cmd if cmd in self.self_cmds):
+        self.self_cmds[cmd](self)
+    addpattern def eval_cmd(self, cmd if self.arg_cmds `hasattr` "cmd_" + cmd):
+        arg_amount = self.arg_cmds. <| ("argc_" + cmd)
+        arg_type = self.arg_cmds. <| ("type_" + cmd)
+        f = self.arg_cmds. <| ("cmd_" + cmd)
+        args = self.op_stack[-arg_amount:]
+        del self.op_stack[-arg_amount:]
+        if all(zip(args, arg_type) |> starmap$(isinstance)):
+            f(self, *args)
+        else:
+            raise ValueError(f"cmd {cmd}, incorrect type: {args} {arg_type}")
+    
+    def jump_to_pair(self, open, close, direction=1):
+        level = 0
+        while True:
+            if self.current_inst == close:
+                level -= 1
+            elif self.current_inst == open:
+                level += 1
+            self.inst_pointer += direction
+            if level <= 0:
+                break
+
+    def eval_instruction(self):
+        try:
+            inst = self.current_inst
+        except IndexError:
+            return False
+        case inst:
+            match "$" + number:
+                self.op_stack.append(number |> float)
+            match "@" + string_:
+                self.op_stack.append(string_)
+            match "if":
+                if self.op_stack.pop() `math.isclose` 0:
+                    self.jump_to_pair("if", "fi", 1)
+            match "hw":
+                self.jump_to_pair("hw", "wh", -1)
+            match "for":
+                times = self.op_stack.pop()
+                self.for_times.append(times)
+                self.for_current.append(0)
+                self.op_stack.append(self.for_current[-1])
+            match "rof":
+                self.for_current[-1] += 1
+                if self.for_current[-1] < self.for_times[-1]:
+                    self.jump_to_pair("rof", "for", -1)
+                    self.op_stack.append(self.for_current[-1])
+                else:
+                    self.for_times.pop()
+                    self.for_current.pop()
+            match "wh" | "fi":
+                pass
+            match cmd is str if cmd[0] in string.ascii_letters + "_":
+                self.eval_cmd(cmd)
+        else:
+            raise ValueError(f"illegal instruction {inst}")
+        self.inst_pointer += 1
+        return True
+
+    def execute_all(self):
+        while True:
+            if not self.eval_instruction():
+                break
+
+if __name__ == "__main__":
+    pass

@@ -1,0 +1,20 @@
+from pikepdf import Pdf, Page, Rectangle, Object, Name
+import pikepdf
+pdf = Pdf.open("test.pdf")
+destination_page = Page(pdf.pages[0])
+thumbnail = Page(pdf.pages[1])
+formx = thumbnail.as_form_xobject(True)
+formx_placed_name = destination_page.add_resource(formx, Name.XObject)
+formx = destination_page.calc_form_xobject_placement(formx, formx_placed_name, Rectangle(0, 0, 300, 300), allow_shrink=True, allow_expand=True)
+print(formx)
+commands = []
+for operands, operator in pikepdf.parse_content_stream(pdf.make_stream(formx)):
+    commands.append([operands, operator])
+original = pikepdf.PdfMatrix(commands[1][0])
+print(original)
+transformed = original.translated(-500, 0).scaled(-1, 1)
+print(transformed)
+commands[1][0] = pikepdf.Array([*transformed.shorthand])
+new_content_stream = pikepdf.unparse_content_stream(commands)
+destination_page.contents_add(new_content_stream)
+pdf.save("page1_with_page2_thumbnail.pdf")

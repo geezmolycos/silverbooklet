@@ -1,0 +1,1 @@
+$297 $2 div $210 vec scale printaffine $4 newpaper $90 rotate afftrans $297 $2 div $0 vec translate afftrans @l @r cut @l swappaper flipx afftranskf @r takeall printdblx
