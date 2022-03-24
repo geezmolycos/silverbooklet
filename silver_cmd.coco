@@ -4,7 +4,9 @@ import pikepdf
 from io import BytesIO
 import argparse
 import os
+import sys
 import re
+import shutil
 
 parser = argparse.ArgumentParser(description="Silver booklet command line interface.")
 parser.add_argument("input_file", help="Source pdf file to be processed.")
@@ -88,15 +90,18 @@ def add_thumbnail(from_page, dest_page, region, back_mirror_x=False, back_mirror
     dest_page.contents_add(new_content_stream)
 
 pdf_input_file = args.input_file
-
+if pdf_input_file.lower() == "stdin:":
+    pdf_input_file = BytesIO()
+    shutil.copyfileobj(sys.stdin.buffer, pdf_input_file)
 pdf = Pdf.open(pdf_input_file)
 page_w_pdf_unit, page_h_pdf_unit = (pdf.pages[0].mediabox |> list)[2:4] |> map$(float)
 page_w, page_h = (page_w_pdf_unit, page_h_pdf_unit) |> map$((*)$(pdf_unit_to_mm))
 #print(page_w, page_h)
 original_page_amount = len(pdf.pages)
 
-pre_code = (args.args |?> re.split$(" |\n")) ?? (args.arg_preset |?> open |?> .read() |?> re.split$(" |\n"))
-code = (args.code |?> re.split$(" |\n")) ?? (args.preset |?> open |?> .read() |?> re.split$(" |\n"))
+refine_file = -> _ |> open |> .read() |> re.sub$(r"#.*$", "") |> re.split$(r" |\n") |> map$(.strip()) |> filter$(-> len(_) != 0) |> list
+pre_code = (args.args |?> re.split$(r" |\n")) ?? (args.arg_preset |?> refine_file)
+code = (args.code |?> re.split$(r" |\n")) ?? (args.preset |?> refine_file)
 
 pre_code ??= []
 if code is None:
@@ -154,17 +159,26 @@ for print_index, region in ex.page_manager.prints.items():
             add_thumbnail(pdf.pages[print_index], target_papers_in_pdf[print_index][1 if is_back else 0], region, back_mirror_x=is_back and back_mirror_x, back_mirror_y=is_back and back_mirror_y)
         except IndexError:
             print("no more pages")
+if args.output.lower() == "stdout:":
+    to_stdout = True
+    bio = BytesIO()
 case args.arrange:
     match "s" | "i" | "1" | "2":
         del output_file.pages[:original_page_amount]
-        output_file.save(args.output ?? file_name_suffix(pdf_input_file, "_output"))
+        if to_stdout:
+            output_file.save(bio)
+        else:
+            output_file.save(args.output ?? file_name_suffix(pdf_input_file, "_output"))
     match "f":
         del front_file.pages[:original_page_amount]
         del back_file.pages[:original_page_amount]
-        front_file.save((args.output |?> file_name_suffix$(?, "_front")) ?? file_name_suffix(pdf_input_file, "_front"))
-        back_file.save((args.output |?> file_name_suffix$(?, "_back")) ?? file_name_suffix(pdf_input_file, "_back"))
-
-
+        if to_stdout:
+            front_file.save(bio)
+            back_file.save(bio)
+        else:
+            front_file.save((args.output |?> file_name_suffix$(?, "_front")) ?? file_name_suffix(pdf_input_file, "_front"))
+            back_file.save((args.output |?> file_name_suffix$(?, "_back")) ?? file_name_suffix(pdf_input_file, "_back"))
+shutil.copyfileobj(bio, sys.stdout.buffer)
 #print(ex.basket.hand.placement[0])
 #print(ex.op_stack)
 #print(ex.page_manager.prints)
