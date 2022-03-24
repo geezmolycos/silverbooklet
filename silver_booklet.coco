@@ -142,7 +142,7 @@ class PaperStack:
         ) |> tuple)
     
     def reverse_paper_order(self) =
-        attr.evolve(self, paper=self.paper |> reversed |> tuple)
+        attr.evolve(self, placement=self.placement |> reversed |> tuple)
     
     def transform(self, *args, **kwargs) = self.paper_eval("transform", *args, **kwargs)
     
@@ -302,9 +302,9 @@ class PaperCuttingProcessExecuter:
         def cmd_store(self, thing, name):
             self.memory[name] = thing
         
-        type_load = (str)
+        type_load = (str,)
         def cmd_load(self, name):
-            self.op_stack.append(self.memory(name))
+            self.op_stack.append(self.memory[name])
 
         type_paperdim = (Vector2D,)
         def cmd_paperdim(self, vec):
@@ -326,8 +326,8 @@ class PaperCuttingProcessExecuter:
         
         type_takeallpaper = (str,)
         def cmd_takeallpaper(self, basket_name):
-            stack, rest = self.basket[basket_name].split(None)
-            self.basket[basket_name] = rest
+            stack = self.basket[basket_name]
+            self.basket[basket_name] = PaperStack()
             self.basket.hand |>= .merge(stack, other_on_top=True)
         
         type_putpaper = (str,)
@@ -391,12 +391,29 @@ class PaperCuttingProcessExecuter:
 
         type_countbasket = (str,)
         def cmd_countbasket(self, basket_name):
-            self.basket[basket_name].raw |> len |> float |> self.op_stack.append
+            self.basket[basket_name].placement |> len |> float |> self.op_stack.append
 
         type_debuglog = (object,)
         def cmd_debuglog(self, thing):
             print("debug info: ", thing)
 
+        type_matplothand = ()
+        def cmd_matplothand(self):
+            import matplotlib.pyplot as plt
+            from matplotlib.patches import Polygon
+            def polygon_from_affine(affine):
+                v = [Vector2D(0, 0), Vector2D(1, 0), Vector2D(1, 1), Vector2D(0, 1)] |> map$(affine.apply_to)
+                return v |> map$(.tuple)
+            #define Matplotlib figure and axis
+            fig, ax = plt.subplots()
+
+            for i, p in enumerate self.basket.hand.placement:
+                ax.add_patch(Polygon(polygon_from_affine(p.front.placement_affine), fill=False, edgecolor="rgbcmy"[i % 6]))
+
+            ax.set_aspect('equal', 'box')
+            ax.set(xlim=(-0, 600), ylim=(-300, 300))
+            #display plot
+            plt.show()
 
     @property
     def current_inst(self) = self.inst_list[self.inst_pointer]
@@ -409,12 +426,15 @@ class PaperCuttingProcessExecuter:
             self.op_stack.append(labels[ch])
 
     def eval_cmd(self, cmd):
-        case cmd:
+        try: case cmd:
             match cmd if cmd in self.arith_cmds:
                 arg_type, f = self.arith_cmds[cmd]
                 arg_amount = len(arg_type)
-                args = self.op_stack[-arg_amount:]
-                del self.op_stack[-arg_amount:]
+                if arg_amount != 0:
+                    args = self.op_stack[-arg_amount:]
+                    del self.op_stack[-arg_amount:]
+                else:
+                    args = []
                 if len(args) == arg_amount and all(zip(args, arg_type) |> starmap$(isinstance)):
                     r = f(*args)
                     if r `isinstance` (tuple, list):
@@ -437,8 +457,11 @@ class PaperCuttingProcessExecuter:
                 arg_type = self.arg_cmds. <| ("type_" + cmd)
                 arg_amount = len(arg_type)
                 f = self.arg_cmds. <| ("cmd_" + cmd)
-                args = self.op_stack[-arg_amount:]
-                del self.op_stack[-arg_amount:]
+                if arg_amount != 0:
+                    args = self.op_stack[-arg_amount:]
+                    del self.op_stack[-arg_amount:]
+                else:
+                    args = []
                 if len(args) == arg_amount and all(zip(args, arg_type) |> starmap$(isinstance)):
                     f(self, *args)
                 else:
@@ -447,6 +470,8 @@ class PaperCuttingProcessExecuter:
                     ))
         else:
             raise ValueError(f"invalid cmd {cmd}")
+        except Exception as e:
+            raise ValueError(f"cmd {cmd} encountered an exception, #{self.inst_pointer}") from e
     
     def jump_to_pair(self, open, close, direction=1):
         level = 0

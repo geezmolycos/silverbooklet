@@ -1,0 +1,58 @@
+# 变量 paper_dim 设定目标纸张大小
+# 变量 cx 设定 x 方向分割数量
+# 变量 cy 设定 y 方向分割数量
+# mu, md, ml, mr 设定纸张边距（mm）
+# pu, pd, pl, pr 设定子页边距（mm）
+# 为从左到右、从上到下排列、保持宽高比(TODO)
+
+$4 @cx store $3 @cy store
+$297 $210 vec @paper_dim store
+$3 dup @mu store dup @md store dup @ml store dup @mr store drop
+$9 dup @pu store dup @pd store dup @pl store dup @pr store drop
+
+# 计算需要纸的张数
+@cx load @cy load mul dup @cells_per_page store
+pageamount swap div ceil @papers store
+# 计算纸张可用区域
+@paper_dim load vecup @paper_dim_h store @paper_dim_w store
+@paper_dim_w load @ml load sub @mr load sub @paper_inner_w store
+@paper_dim_h load @md load sub @mu load sub @paper_inner_h store
+# 获取纸张
+@paper_dim load paperdim
+@papers load newpaper
+@unprocessed putpaper
+# 计算每一格外框的长宽
+@paper_inner_w load @cx load div @cell_outer_w store
+@paper_inner_h load @cy load div @cell_outer_h store
+
+# 计算到第一个位置的变换
+@ml load neg
+@paper_dim_h load @mu load sub @cell_outer_h load sub neg
+vec translate @to_first_place store
+# 向右挪一格的变换
+@cell_outer_w load neg $0 vec translate @right store
+$0 @cell_outer_h load vec translate @down store
+
+@papers load for drop
+    @unprocessed $1 takepaper
+    @to_first_place load transform
+    @cy load for drop
+        @next_row @this_row cutpaper
+        @this_row takeallpaper
+        @cx load $1 sub for drop
+            @split_result @temp cutpaper
+            @temp takeallpaper
+            @right load transform
+        rof
+        @split_result putpaper
+        @next_row takeallpaper
+        @down load transform
+    rof
+    @scrap putpaper
+rof
+@split_result takeallpaper
+reversepaper
+@pl load neg @pd load neg vec translate transform
+@cell_outer_w load @pl load sub @pr load sub
+@cell_outer_h load @pd load sub @pu load sub
+vec scale printaffine print1

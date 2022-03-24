@@ -99,7 +99,7 @@ page_w, page_h = (page_w_pdf_unit, page_h_pdf_unit) |> map$((*)$(pdf_unit_to_mm)
 #print(page_w, page_h)
 original_page_amount = len(pdf.pages)
 
-refine_file = -> _ |> open |> .read() |> re.sub$(r"#.*$", "") |> re.split$(r" |\n") |> map$(.strip()) |> filter$(-> len(_) != 0) |> list
+refine_file = -> _ |> open$(?, encoding="utf-8") |> .read() |> re.sub$(r"#.*$", "", flags=re.M) |> re.split$(r" |\n") |> map$(.strip()) |> filter$(-> len(_) != 0) |> list
 pre_code = (args.args |?> re.split$(r" |\n")) ?? (args.arg_preset |?> refine_file)
 code = (args.code |?> re.split$(r" |\n")) ?? (args.preset |?> refine_file)
 
@@ -113,6 +113,8 @@ ex = PaperCuttingProcessExecuter(
     paper_manager=PaperCuttingPaperManager(Vector2D(210, 297))
 )
 ex.execute_all(debug_output=False)
+if len ex.op_stack != 0:
+    print(f"warning: unbalanced stack operation. {ex.op_stack}")
 try:
     paper_amount = ex.paper_manager.generated_paper |> map$(.meta ..> .["index"]) |> max
 except ValueError as e:
@@ -153,13 +155,20 @@ case args.arrange:
 for print_index, region in ex.page_manager.prints.items():
     is_back = not region.isfront
     if print_index < original_page_amount:
-        #print(f"now adding source page{print_index}")
-        #print(region)
         try:
-            add_thumbnail(pdf.pages[print_index], target_papers_in_pdf[print_index][1 if is_back else 0], region, back_mirror_x=is_back and back_mirror_x, back_mirror_y=is_back and back_mirror_y)
-        except IndexError:
+            target = target_papers_in_pdf[region.paper.meta["index"]][1 if is_back else 0]
+            if target is not None:
+                add_thumbnail(
+                    pdf.pages[print_index],
+                    target,
+                    region,
+                    back_mirror_x=is_back and back_mirror_x, back_mirror_y=is_back and back_mirror_y
+                )
+        except KeyError:
             print("no more pages")
-if args.output.lower() == "stdout:":
+            raise
+to_stdout = False
+if args.output?.lower() == "stdout:":
     to_stdout = True
     bio = BytesIO()
 case args.arrange:
@@ -178,7 +187,8 @@ case args.arrange:
         else:
             front_file.save((args.output |?> file_name_suffix$(?, "_front")) ?? file_name_suffix(pdf_input_file, "_front"))
             back_file.save((args.output |?> file_name_suffix$(?, "_back")) ?? file_name_suffix(pdf_input_file, "_back"))
-shutil.copyfileobj(bio, sys.stdout.buffer)
+if to_stdout:
+    shutil.copyfileobj(bio, sys.stdout.buffer)
 #print(ex.basket.hand.placement[0])
 #print(ex.op_stack)
 #print(ex.page_manager.prints)
