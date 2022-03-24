@@ -179,7 +179,10 @@ class PaperCuttingPageManager:
     page_intrinsic_dim = attr.ib()
     page_index = attr.ib(default=0)
     prints = attr.ib(factory=dict)
-    print_affine = attr.ib(default=Affine.identity())
+    print_affine = attr.ib(default=None)
+
+    def __attrs_post_init__(self):
+        self.print_affine ??= Affine.from_scale(self.page_intrinsic_dim)
     
     def get_page_amount(self) = self.page_amount
     def get_page_dim(self) = self.page_intrinsic_dim
@@ -250,35 +253,37 @@ class PaperCuttingProcessExecuter:
     paper_manager = attr.ib(kw_only=True, factory=PaperCuttingPaperManager)
 
     arith_cmds = {
-        "neg": (1, (float,), (-)),
-        "add": (2, (float, float), (+)),
-        "sub": (2, (float, float), (-)),
-        "mul": (2, (float, float), (*)),
-        "div": (2, (float, float), (/)),
-        "pow": (2, (float, float), (**)),
-        "abs": (1, (float,), abs),
-        "floor": (1, (float,), math.floor),
-        "ceil": (1, (float,), math.ceil),
+        "neg": (1, (object,), (-)),
+        "add": (2, (object, object), (+)),
+        "sub": (2, (object, object), (-)),
+        "mul": (2, (object, object), (*)),
+        "div": (2, (object, object), (/)),
+        "pow": (2, (object, object), (**)),
+        "abs": (1, (object,), abs),
+        "floor": (1, (float,), math.floor ..> float),
+        "ceil": (1, (float,), math.ceil ..> float),
         "round": (1, (float,), round),
-        "eq": (2, (float, float), math.isclose ..> float),
-        "neq": (2, (float, float), math.isclose ..> (not) ..> float),
-        "gt": (2, (float, float), (>) ..> float),
-        "lt": (2, (float, float), (<) ..> float),
+        "aeq": (2, (float, float), math.isclose ..> float),
+        "aneq": (2, (float, float), math.isclose ..> (not) ..> float),
+        "eq": (2, (object, object), (==)),
+        "neq": (2, (object, object), (!=)),
+        "gt": (2, (object, object), (>) ..> float),
+        "lt": (2, (object, object), (<) ..> float),
         "not": (1, (float,), (not) ..> float),
         "or": (2, (float, float), (or) ..> float),
         "and": (2, (float, float), (and) ..> float),
         "xor": (2, (float, float), (a, b) -> (bool(a), bool(b)) |*> (^) |> float),
         "vec": (2, (float, float), Vector2D),
-        "upvec": (1, (Vector2D,), .tuple),
+        "vecup": (1, (Vector2D,), .tuple),
         "affine": (3, (Vector2D, Vector2D, Vector2D), Affine),
-        "upaffine": (1, (Affine,), -> (_.mati, _.matj, _.translation)),
+        "affineup": (1, (Affine,), -> (_.mati, _.matj, _.translation)),
         "affineinv": (1, (Affine,), .inverse()),
         "rotate": (1, (float,), Affine.from_rotation),
         "translate": (1, (Vector2D,), Affine.from_translation),
         "scale": (1, (Vector2D,), Affine.from_scale),
         "flipx": (0, (), -> Affine(Vector2D(-1, 0), Vector2D(0, 1), Vector2D(0, 0))),
         "flipy": (0, (), -> Affine(Vector2D(1, 0), Vector2D(0, -1), Vector2D(0, 0))),
-        "affineidentity": (0, (), Affine.identity),
+        "identity": (0, (), Affine.identity),
     }
 
     stack_cmds = {
@@ -289,17 +294,17 @@ class PaperCuttingProcessExecuter:
         "drop": ("a", ""),
     }
 
-    self_cmds = {
-        "st": (def (self) ->
-            name is str = self.op_stack.pop();
-            thing = self.op_stack.pop();
-            self.memory[name] = thing),
-        "ld": (def (self) ->
-            name is str = self.op_stack.pop();
-            self.memory[name] |> self.op_stack.append),
-    }
-
     class arg_cmds:
+
+        argc_store = 2
+        type_store = (str, object)
+        def cmd_store(self, name, thing):
+            self.memory[name] = thing
+        
+        argc_load = 1
+        type_load = (str)
+        def cmd_load(self, name):
+            self.op_stack.append(self.memory(name))
 
         argc_paperdim = 1
         type_paperdim = (Vector2D,)
@@ -322,9 +327,9 @@ class PaperCuttingProcessExecuter:
             self.basket[basket_name] = rest
             self.basket.hand |>= .merge(stack, other_on_top=True)
         
-        argc_takeall = 1
-        type_takeall = (str,)
-        def cmd_takeall(self, basket_name):
+        argc_takeallpaper = 1
+        type_takeallpaper = (str,)
+        def cmd_takeallpaper(self, basket_name):
             stack, rest = self.basket[basket_name].split(None)
             self.basket[basket_name] = rest
             self.basket.hand |>= .merge(stack, other_on_top=True)
@@ -340,26 +345,26 @@ class PaperCuttingProcessExecuter:
         def cmd_swappaper(self, basket_name):
             self.basket[basket_name], self.basket.hand = self.basket.hand, self.basket[basket_name]
         
-        argc_cut = 2
-        type_cut = (str, str)
-        def cmd_cut(self, b1, b2):
+        argc_cutpaper = 2
+        type_cutpaper = (str, str)
+        def cmd_cutpaper(self, b1, b2):
             self.basket[b1] |>= .merge(self.basket.hand, other_on_top=True)
             self.basket[b2] |>= .merge(self.basket.hand, other_on_top=True)
             self.basket.hand = PaperStack()
         
-        argc_reverse = 0
-        type_reverse = ()
-        def cmd_reverse(self):
+        argc_reversepaper = 0
+        type_reversepaper = ()
+        def cmd_reversepaper(self):
             self.basket.hand |>= .reverse_paper_order()
         
-        argc_afftrans = 1
-        type_afftrans = (Affine,)
-        def cmd_afftrans(self, affine):
+        argc_transform = 1
+        type_transform = (Affine,)
+        def cmd_transform(self, affine):
             self.basket.hand |>= .transform(affine)
         
-        argc_afftranskf = 1
-        type_afftranskf = (Affine,)
-        def cmd_afftranskf(self, affine):
+        argc_transformflip = 1
+        type_transformflip = (Affine,)
+        def cmd_transformflip(self, affine):
             self.basket.hand |>= .keepfront_transform(affine)
         
         argc_printaffine = 1
@@ -370,7 +375,7 @@ class PaperCuttingProcessExecuter:
         argc_pageamount = 0
         type_pageamount = ()
         def cmd_pageamount(self):
-            self.page_manager.get_page_amount() |> self.op_stack.append
+            self.page_manager.get_page_amount() |> float |> self.op_stack.append
         
         argc_printidx = 1
         type_printidx = (float,)
@@ -392,20 +397,26 @@ class PaperCuttingProcessExecuter:
         def cmd_print2(self):
             self.page_manager.print_intervening_side_to(self.basket.hand)
         
-        argc_printdblx = 0
-        type_printdblx = ()
-        def cmd_printdblx(self):
+        argc_printdoublex = 0
+        type_printdoublex = ()
+        def cmd_printdoublex(self):
             self.page_manager.print_double_side_to(self.basket.hand, mirror_x=True)
 
-        argc_printdbly = 0
-        type_printdbly = ()
-        def cmd_printdbly(self):
+        argc_printdoubley = 0
+        type_printdoubley = ()
+        def cmd_printdoubley(self):
             self.page_manager.print_double_side_to(self.basket.hand, mirror_y=True)
 
         argc_countbasket = 1
         type_countbasket = (str,)
         def cmd_countbasket(self, basket_name):
             self.basket[basket_name].raw |> len |> float |> self.op_stack.append
+
+        argc_debuglog = 1
+        type_debuglog = (object,)
+        def cmd_debuglog(self, thing):
+            print("debug info: ", thing)
+
 
     @property
     def current_inst(self) = self.inst_list[self.inst_pointer]
@@ -417,38 +428,42 @@ class PaperCuttingProcessExecuter:
         for ch in to:
             self.op_stack.append(labels[ch])
 
-    def eval_cmd(self, cmd if cmd in self.arith_cmds):
-        arg_amount, arg_type, f = self.arith_cmds[cmd]
-        args = self.op_stack[-arg_amount:]
-        del self.op_stack[-arg_amount:]
-        if all(zip(args, arg_type) |> starmap$(isinstance)):
-            r = f(*args)
-            if r `isinstance` (tuple, list):
-                self.op_stack.extend(r)
-            else:
-                self.op_stack.append(r)
+    def eval_cmd(self, cmd):
+        case cmd:
+            match cmd if cmd in self.arith_cmds:
+                arg_amount, arg_type, f = self.arith_cmds[cmd]
+                args = self.op_stack[-arg_amount:]
+                del self.op_stack[-arg_amount:]
+                if all(zip(args, arg_type) |> starmap$(isinstance)):
+                    r = f(*args)
+                    if r `isinstance` (tuple, list):
+                        self.op_stack.extend(r)
+                    else:
+                        self.op_stack.append(r)
+                else:
+                    raise ValueError(f"cmd {cmd}, incorrect type: {args} {arg_type}")
+            match cmd if cmd in self.stack_cmds:
+                self.manip_stack(*self.stack_cmds[cmd])
+            match "manip":
+                a, b = self.op_stack.pop(), self.op_stack.pop()
+                self.manip_stack(b, a)
+            match "rev":
+                n = int(self.op_stack.pop())
+                self.op_stack[-n:] |>= reversed
+            match cmd if self.arg_cmds `hasattr` "cmd_" + cmd:
+                arg_type = self.arg_cmds. <| ("type_" + cmd)
+                arg_amount = len(arg_type)
+                f = self.arg_cmds. <| ("cmd_" + cmd)
+                args = self.op_stack[-arg_amount:]
+                del self.op_stack[-arg_amount:]
+                if len(args) == arg_amount and all(zip(args, arg_type) |> starmap$(isinstance)):
+                    f(self, *args)
+                else:
+                    raise ValueError(f"cmd {cmd}, incorrect type: {args} given, {arg_type} expected." + (
+                        if len(args) != arg_amount then " It's possible that the stack is empty due to unbalanced stack operation." else ""
+                    ))
         else:
-            raise ValueError(f"cmd {cmd}, incorrect type: {args} {arg_type}")
-    addpattern def eval_cmd(self, cmd if cmd in self.stack_cmds):
-        self.manip_stack(*self.stack_cmds[cmd])
-    addpattern def eval_cmd(self, "manip"):
-        a, b = self.op_stack.pop(), self.op_stack.pop()
-        self.manip_stack(b, a)
-    addpattern def eval_cmd(self, "rev"):
-        n = int(self.op_stack.pop())
-        self.op_stack[-n:] |>= reversed
-    addpattern def eval_cmd(self, cmd if cmd in self.self_cmds):
-        self.self_cmds[cmd](self)
-    addpattern def eval_cmd(self, cmd if self.arg_cmds `hasattr` "cmd_" + cmd):
-        arg_amount = self.arg_cmds. <| ("argc_" + cmd)
-        arg_type = self.arg_cmds. <| ("type_" + cmd)
-        f = self.arg_cmds. <| ("cmd_" + cmd)
-        args = self.op_stack[-arg_amount:]
-        del self.op_stack[-arg_amount:]
-        if all(zip(args, arg_type) |> starmap$(isinstance)):
-            f(self, *args)
-        else:
-            raise ValueError(f"cmd {cmd}, incorrect type: {args} {arg_type}")
+            raise ValueError(f"invalid cmd {cmd}")
     
     def jump_to_pair(self, open, close, direction=1):
         level = 0
@@ -457,9 +472,9 @@ class PaperCuttingProcessExecuter:
                 level -= 1
             elif self.current_inst == open:
                 level += 1
-            self.inst_pointer += direction
             if level <= 0:
                 break
+            self.inst_pointer += direction
 
     def eval_instruction(self):
         try:
@@ -498,8 +513,13 @@ class PaperCuttingProcessExecuter:
         self.inst_pointer += 1
         return True
 
-    def execute_all(self):
+    def execute_all(self, debug_output=False):
         while True:
+            if debug_output:
+                print(f"IP: {self.inst_pointer}, Inst: {self.current_inst}")
+                print(f"    Stack: {self.op_stack}")
+                if len(self.for_times) != 0:
+                    print(f"    For loop times: {self.for_times}, current {self.for_current}")
             if not self.eval_instruction():
                 break
 
