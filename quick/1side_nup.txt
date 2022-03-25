@@ -3,12 +3,7 @@
 # 变量 cy 设定 y 方向分割数量
 # mu, md, ml, mr 设定纸张边距（mm）
 # pu, pd, pl, pr 设定子页边距（mm）
-# 为从左到右、从上到下排列、保持宽高比(TODO)
-
-$4 @cx store $3 @cy store
-$297 $210 vec @paper_dim store
-$3 dup @mu store dup @md store dup @ml store dup @mr store drop
-$9 dup @pu store dup @pd store dup @pl store dup @pr store drop
+# 为从左到右、从上到下排列、保持宽高比
 
 # 计算需要纸的张数
 @cx load @cy load mul dup @cells_per_page store
@@ -22,9 +17,18 @@ pageamount swap div ceil @papers store
 @papers load newpaper
 @unprocessed putpaper
 # 计算每一格外框的长宽
-@paper_inner_w load @cx load div @cell_outer_w store
-@paper_inner_h load @cy load div @cell_outer_h store
-
+@paper_inner_w load @cx load div dup @cell_outer_w store
+@paper_inner_h load @cy load div dup @cell_outer_h store
+# 内框长宽
+swap
+@pl load sub @pr load sub @cell_inner_w store
+@pd load sub @pu load sub @cell_inner_h store
+# 计算最终渲染的实际大小(保持宽高比)
+pagedim vecup swap
+@cell_inner_w load swap div swap @cell_inner_h load swap div min # 计算缩放倍率
+pagedim mul vecup swap @print_w store @print_h store
+@cell_inner_w load @print_w load sub $2 div @cell_print_shift_x store
+@cell_inner_h load @print_h load sub $2 div @cell_print_shift_y store
 # 计算到第一个位置的变换
 @ml load neg
 @paper_dim_h load @mu load sub @cell_outer_h load sub neg
@@ -52,7 +56,7 @@ $0 @cell_outer_h load vec translate @down store
 rof
 @split_result takeallpaper
 reversepaper
-@pl load neg @pd load neg vec translate transform
-@cell_outer_w load @pl load sub @pr load sub
-@cell_outer_h load @pd load sub @pu load sub
-vec scale printaffine print1
+@print_w load @print_h load vec scale
+@pl load @pd load vec translate mul
+@cell_print_shift_x load @cell_print_shift_y load vec translate mul
+printaffine print1

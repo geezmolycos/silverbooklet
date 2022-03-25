@@ -259,6 +259,8 @@ class PaperCuttingProcessExecuter:
         "mul": ((object, object), (*)),
         "div": ((object, object), (/)),
         "pow": ((object, object), (**)),
+        "min": ((object, object), min),
+        "max": ((object, object), max),
         "abs": ((object,), abs),
         "floor": ((float,), math.floor ..> float),
         "ceil": ((float,), math.ceil ..> float),

@@ -68,6 +68,7 @@ silver_cmd --argv [-h] [-o OUTPUT] [-p PRESET] [-c CODE] [--arg-preset ARG_PRESE
 |----|----|----|
 |`neg, abs`|a|相反数、绝对值|
 |`add, sub, mul, div, pow`|a, b|四则运算及乘方|
+|`max, min`|a, b|计算最大最小值|
 |`floor, ceil, round`|a|向上、向下和舍入取整|
 |`aeq`|a, b|判断a和b是否近似相等(math.isclose)，相等则输出1.0，否则输出0.0|
 |`aneq`|a, b|上述命令的否定|
@@ -130,6 +131,7 @@ silver_cmd --argv [-h] [-o OUTPUT] [-p PRESET] [-c CODE] [--arg-preset ARG_PRESE
 |`printdoubley`||类似上一条，y轴翻转|
 |`countbasket`|str basket|获取basket中纸的张数|
 |`debuglog`|thing|将thing显示到程序输出中，以便于调试|
+|`matplothand`||使用matplotlib画出手拿的纸|
 
 ## 流程控制命令
 

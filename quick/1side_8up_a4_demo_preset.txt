@@ -1,0 +1,4 @@
+$4 @cx store $2 @cy store
+$297 $210 vec @paper_dim store
+$15 dup @mu store dup @md store dup @ml store dup @mr store drop
+$0 dup @pu store dup @pd store dup @pl store dup @pr store drop
