@@ -1,29 +1,40 @@
 # 折半骑马钉
 # 变量 paper_dim 设定目标纸张大小
 # pu, pd, pl, pr 设定首页边距（mm）
-
-@paper_dim load paperdim
-pageamount $4 div ceil dup @paper_amount store
-newpaper
+# section 设定一叠纸的张数
 
 @paper_dim load vecup drop $2 div # 纸张宽度一半
 dup @paper_half_width store
-neg $0 vec translate transform # 向左挪一半
-@b1 @b2 cutpaper
-@b2 takeallpaper
-flipx transformflip reversepaper
-@b1 takeallpaper
+neg $0 vec translate @lefthalf store # 向左挪一半
 
+# 保持宽高比
 @paper_half_width load @pl load sub @pr load sub @inner_width store
 @paper_dim load vecup swap drop
 @pu load sub @pd load sub @inner_height store
-# 保持宽高比
 pagedim vecup swap
 @inner_width load swap div swap @inner_height load swap div min # 计算缩放倍率
 pagedim mul vecup swap @print_w store @print_h store
 @inner_width load @print_w load sub $2 div @print_shift_x store
 @inner_height load @print_h load sub $2 div @print_shift_y store
 
+@paper_dim load paperdim
+
+$0 @current_pages store # 计算已经渲染好的页面数量
+wh @current_pages load pageamount lt if
+    @section load newpaper
+
+    @lefthalf load transform
+    @b1 @b2 cutpaper
+    @b2 takeallpaper
+    flipx transformflip reversepaper
+    @b1 takeallpaper
+
+    reversepaper # 反着放入，到时候取出的时候再反过来，保持整体顺序正确
+    @result putpaper
+    @current_pages load $4 @section load mul add @current_pages store
+hw fi
+@result takeallpaper
+reversepaper
 @print_w load @print_h load vec scale
 @pl load @print_shift_x load add
 @pd load @print_shift_y load add
