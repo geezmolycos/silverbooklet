@@ -69,6 +69,9 @@ def affine_to_pdf_matrix(affine):
 pdf_unit_to_mm = 1 / 72 * 25.4
 mm_to_pdf_unit = 1 / 25.4 * 72
 
+page_to_pdf_unit_dim = -> _.mediabox |> list |> .[2:4] |> map$(float) |> tuple |*> Vector2D
+page_to_mm_dim = page_to_pdf_unit_dim ..> (*)$(pdf_unit_to_mm)
+
 def add_thumbnail(from_page, dest_page, region, back_mirror_x=False, back_mirror_y=False):
     #print(region.paper.meta["index"] + original_page_amount, page_index)
     formx = from_page.as_form_xobject(True)
@@ -81,7 +84,7 @@ def add_thumbnail(from_page, dest_page, region, back_mirror_x=False, back_mirror
     #print(Affine.from_scale(Vector2D(page_w, page_h)).inverse() * region.affine * mm_to_pdf_unit)
     region_affine = region.affine
     region_affine *= Affine.from_translation(-region.paper.intrinsic_dim * 0.5) * Affine.from_scale(Vector2D(-1 if back_mirror_x else 1, -1 if back_mirror_y else 1))  * Affine.from_translation(region.paper.intrinsic_dim * 0.5)
-    af = Affine.from_scale(Vector2D(page_w_pdf_unit, page_h_pdf_unit)).inverse() * region_affine * mm_to_pdf_unit
+    af = Affine.from_scale(page_to_pdf_unit_dim(from_page)).inverse() * region_affine * mm_to_pdf_unit
     transformed = affine_to_pdf_matrix(af)
     #print(transformed)
     commands[1][0] = pikepdf.Array([*transformed.shorthand])
@@ -94,8 +97,7 @@ if pdf_input_file.lower() == "stdin:":
     pdf_input_file = BytesIO()
     shutil.copyfileobj(sys.stdin.buffer, pdf_input_file)
 pdf = Pdf.open(pdf_input_file)
-page_w_pdf_unit, page_h_pdf_unit = (pdf.pages[0].mediabox |> list)[2:4] |> map$(float)
-page_w, page_h = (page_w_pdf_unit, page_h_pdf_unit) |> map$((*)$(pdf_unit_to_mm))
+page_sizes = pdf.pages |> map$(page_to_mm_dim) |> list
 #print(page_w, page_h)
 original_page_amount = len(pdf.pages)
 
@@ -107,9 +109,16 @@ pre_code ??= []
 if code is None:
     raise ValueError("no code available, check if -p or -c is preset")
 
+@attr.s
+class PdfVarPageSizePageManager(PaperCuttingPageManager):
+    page_sizes = attr.ib(kw_only=True)
+
+    def get_page_dim(self):
+        return self.page_sizes[self.page_index]
+
 ex = PaperCuttingProcessExecuter(
     pre_code + code,
-    page_manager=PaperCuttingPageManager(original_page_amount, Vector2D(page_w, page_h)),
+    page_manager=PdfVarPageSizePageManager(original_page_amount, Vector2D(-1, -1), page_sizes=page_sizes),
     paper_manager=PaperCuttingPaperManager(Vector2D(210, 297))
 )
 ex.execute_all(debug_output=False)

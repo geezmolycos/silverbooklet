@@ -1,9 +1,11 @@
+# n页合1页
+# 为从左到右、从上到下排列、保持宽高比
 # 变量 paper_dim 设定目标纸张大小
 # 变量 cx 设定 x 方向分割数量
 # 变量 cy 设定 y 方向分割数量
 # mu, md, ml, mr 设定纸张边距（mm）
 # pu, pd, pl, pr 设定子页边距（mm）
-# 为从左到右、从上到下排列、保持宽高比
+# double 设定是否双面打印
 
 # 计算需要纸的张数
 @cx load @cy load mul dup @cells_per_page store
@@ -59,4 +61,9 @@ reversepaper
 @print_w load @print_h load vec scale
 @pl load @pd load vec translate mul
 @cell_print_shift_x load @cell_print_shift_y load vec translate mul
-printaffine print1
+printaffine
+@double load dup if
+    printdoublex
+fi not if
+    print1
+fi
