@@ -1,0 +1,7 @@
+
+$297 $210 vec @paper_dim store
+$15 dup @mu store dup @md store dup @ml store dup @mr store drop
+$0 dup @pu store dup @pd store dup @pl store dup @pr store drop
+$1 @double store
+$1 @section store
+@<Rd @inst store

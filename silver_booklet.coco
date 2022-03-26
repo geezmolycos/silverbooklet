@@ -66,6 +66,8 @@ class Affine:
     def det(self) =
         self.mati.cross_product(self.matj)
     
+    __abs__ = det
+    
     def bounding_box(self):
         corners = ((0, 0), (1, 0), (0, 1), (1, 1)) |> starmap$(Vector2D)
         applied = corners |> map$(self.apply_to)
@@ -258,6 +260,7 @@ class PaperCuttingProcessExecuter:
         "sub": ((object, object), (-)),
         "mul": ((object, object), (*)),
         "div": ((object, object), (/)),
+        "mod": ((object, object), (%)),
         "pow": ((object, object), (**)),
         "min": ((object, object), min),
         "max": ((object, object), max),
@@ -288,6 +291,8 @@ class PaperCuttingProcessExecuter:
         "flipx": ((), -> Affine(Vector2D(-1, 0), Vector2D(0, 1), Vector2D(0, 0))),
         "flipy": ((), -> Affine(Vector2D(1, 0), Vector2D(0, -1), Vector2D(0, 0))),
         "identity": ((), Affine.identity),
+        "strsub": ((str, float, float), (s, a, b) -> s[int a: int b]),
+        "strlen": ((str,), len ..> float),
     }
 
     stack_cmds = {
@@ -398,9 +403,13 @@ class PaperCuttingProcessExecuter:
         type_debuglog = (object,)
         def cmd_debuglog(self, thing):
             print("debug info: ", thing)
+        
+        type_debuglog = ()
+        def cmd_debuglog(self):
+            print("debug stack: ", self.op_stack)
 
-        type_matplothand = ()
-        def cmd_matplothand(self):
+        type_debugplothand = ()
+        def cmd_debugplothand(self):
             import matplotlib.pyplot as plt
             from matplotlib.patches import Polygon
             def polygon_from_affine(affine):
@@ -505,12 +514,12 @@ class PaperCuttingProcessExecuter:
                 times = self.op_stack.pop()
                 self.for_times.append(times)
                 self.for_current.append(0)
-                self.op_stack.append(self.for_current[-1])
+                self.op_stack.append(self.for_current[-1] |> float)
             match "rof":
                 self.for_current[-1] += 1
                 if self.for_current[-1] < self.for_times[-1]:
                     self.jump_to_pair("rof", "for", -1)
-                    self.op_stack.append(self.for_current[-1])
+                    self.op_stack.append(self.for_current[-1] |> float)
                 else:
                     self.for_times.pop()
                     self.for_current.pop()

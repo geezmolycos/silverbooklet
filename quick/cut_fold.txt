@@ -1,0 +1,89 @@
+# 可以递归的页面切分或折叠
+# 变量 inst 是一个字符串，设定切分方式，</> 代表左右切分，放在上面的一摞
+# ^/v 代表上下切分，放到上面的一摞
+# l/r/u/d代表切分沿山峰方向折叠
+# L/R/U/D代表切分沿山谷方向折叠
+# 变量 paper_dim 设定目标纸张大小
+# mu, md, ml, mr 设定纸张边距（mm）
+# pu, pd, pl, pr 设定子页边距（mm）
+# section 设定每叠纸张数
+# double 设定是否双面打印
+
+# 计算纸张可用区域
+@paper_dim load vecup @paper_dim_h store @paper_dim_w store
+@paper_dim_w load @ml load sub @mr load sub @paper_inner_w store
+@paper_dim_h load @md load sub @mu load sub @paper_inner_h store
+
+$0 @current_pages store # 计算已经渲染好的页面数量
+wh @current_pages load pageamount lt if
+    # 获取纸张，一次拿一叠纸
+    @paper_dim load paperdim
+    @section load newpaper
+    @ml load neg @md load neg vec translate transform
+
+    @paper_inner_w load @cell_w store
+    @paper_inner_h load @cell_h store
+
+    @inst load strlen for
+        @inst load swap dup $1 add strsub
+        dup @< eq over @l eq or over @L eq or over @> eq or over @r eq or over @R eq or if
+            @cell_w load $2 div @cell_w store
+            @cell_w load neg $0 vec translate @ru_transform store
+            flipx @cell_w load $0 vec translate mul @flip_transform store
+        fi
+        dup @v eq over @d eq or over @D eq or over @^ eq or over @u eq or over @U eq or if
+            @cell_h load $2 div @cell_h store
+            $0 @cell_h load neg vec translate @ru_transform store
+            flipy $0 @cell_h load vec translate mul @flip_transform store
+        fi
+        @bld @bru cutpaper
+        @bld takeallpaper
+        dup @L eq over @r eq or over @D eq or over @u eq or if # 按照上面设定的方向翻转bld
+            @flip_transform load transformflip reversepaper
+        fi
+        @bld putpaper
+        @bru takeallpaper
+        @ru_transform load transform
+        dup @l eq over @R eq or over @d eq or over @U eq or if # 按照上面设定的方向翻转bru
+            @flip_transform load transformflip reversepaper
+        fi
+        @bru putpaper
+        dup @< eq over @l eq or over @L eq or over @v eq or over @d eq or over @D eq or if
+            @bru takeallpaper
+            @bld takeallpaper
+        fi
+        dup @> eq over @r eq or over @R eq or over @^ eq or over @u eq or over @U eq or if
+            @bld takeallpaper
+            @bru takeallpaper
+        fi
+        drop
+    rof
+    @current_pages load
+    @hand countbasket @double load if $2 mul fi
+    add
+    @current_pages store
+    reversepaper
+    @result putpaper
+hw fi
+
+@result takeallpaper
+reversepaper
+
+@cell_w load @pl load sub @pr load sub @cell_inner_w store
+@cell_h load @pd load sub @pu load sub @cell_inner_h store
+# 计算最终渲染的实际大小(保持宽高比)
+pagedim vecup swap
+@cell_inner_w load swap div swap @cell_inner_h load swap div min # 计算缩放倍率
+pagedim mul vecup swap @print_w store @print_h store
+@cell_inner_w load @print_w load sub $2 div @cell_print_shift_x store
+@cell_inner_h load @print_h load sub $2 div @cell_print_shift_y store
+
+@print_w load @print_h load vec scale
+@pl load @pd load vec translate mul
+@cell_print_shift_x load @cell_print_shift_y load vec translate mul
+printaffine
+@double load dup if
+    printdoublex
+fi not if
+    print1
+fi

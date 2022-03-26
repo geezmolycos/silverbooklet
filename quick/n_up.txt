@@ -9,7 +9,11 @@
 
 # 计算需要纸的张数
 @cx load @cy load mul dup @cells_per_page store
-pageamount swap div ceil @papers store
+pageamount swap div ceil
+@double load if
+    $2 div ceil
+fi
+@papers store
 # 计算纸张可用区域
 @paper_dim load vecup @paper_dim_h store @paper_dim_w store
 @paper_dim_w load @ml load sub @mr load sub @paper_inner_w store

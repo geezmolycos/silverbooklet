@@ -67,7 +67,7 @@ silver_cmd --argv [-h] [-o OUTPUT] [-p PRESET] [-c CODE] [--arg-preset ARG_PRESE
 |命令|参数|功能|
 |----|----|----|
 |`neg, abs`|a|相反数、绝对值|
-|`add, sub, mul, div, pow`|a, b|四则运算及乘方|
+|`add, sub, mul, div, mod, pow`|a, b|四则运算及乘方|
 |`max, min`|a, b|计算最大最小值|
 |`floor, ceil, round`|a|向上、向下和舍入取整|
 |`aeq`|a, b|判断a和b是否近似相等(math.isclose)，相等则输出1.0，否则输出0.0|
@@ -88,6 +88,8 @@ silver_cmd --argv [-h] [-o OUTPUT] [-p PRESET] [-c CODE] [--arg-preset ARG_PRESE
 |`flipx`||沿x轴翻转的仿射变换|
 |`flipy`||沿y轴翻转的仿射变换|
 |`identity`||单位仿射变换|
+|`strsub`|str s, float a, float b|字符串取子串|
+|`strlen`|str s|获取字符串长度|
 
 ## 栈操作命令
 
@@ -131,7 +133,8 @@ silver_cmd --argv [-h] [-o OUTPUT] [-p PRESET] [-c CODE] [--arg-preset ARG_PRESE
 |`printdoubley`||类似上一条，y轴翻转|
 |`countbasket`|str basket|获取basket中纸的张数|
 |`debuglog`|thing|将thing显示到程序输出中，以便于调试|
-|`matplothand`||使用matplotlib画出手拿的纸|
+|`debugstack`||输出当前栈中内容|
+|`debugplothand`||使用matplotlib画出手拿的纸|
 
 ## 流程控制命令
 
