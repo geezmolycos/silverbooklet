@@ -1,0 +1,29 @@
+import silver_cmd
+from io import BytesIO
+import shlex
+import argparse
+
+def main(args=None):
+    parser = argparse.ArgumentParser(description="Silver booklet batch utility.")
+    parser.add_argument("mode", choices=["f", "s"], help="f: file, s: string")
+    parser.add_argument("thing", help="file or string")
+    parser.add_argument("--sep", help="separator for commands, default \\n for file, ; for string")
+
+    args = parser.parse_args(args)
+
+    if args.mode == "s":
+        sep = args.sep ?? ";"
+        commands = args.thing.split(sep)
+    elif args.mode == "f":
+        sep = args.sep ?? "\n"
+        with open(args.thing, "r", encoding="utf-8") as f:
+            commands = f.read().split(sep)
+    commands |>= map$(.strip()) ..> filter$(-> len(_) != 0)
+    commands |>= map$(shlex.split)
+    bio_dict = {}
+    for cmd in commands:
+        print(cmd)
+        silver_cmd.main(cmd, bio_dict)
+
+if __name__ == "__main__":
+    main()

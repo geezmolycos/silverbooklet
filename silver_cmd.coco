@@ -8,53 +8,12 @@ import sys
 import re
 import shutil
 
-parser = argparse.ArgumentParser(description="Silver booklet command line interface.")
-parser.add_argument("input_file", help="Source pdf file to be processed.")
-parser.add_argument(
-    "-o", "--output",
-    help="Output file name. If page arrangement is set to 'file', then suffix '_front' and '_back' will be added."
-)
-parser.add_argument(
-    "-p", "--preset",
-    help="Get instruction sequence from a preset file."
-)
-parser.add_argument(
-    "-c", "--code",
-    help="Get instruction sequence from command line argument. Takes precedence over '--preset'."
-)
-parser.add_argument(
-    "--arg-preset",
-    help="Load instruction arguments (pre-applying code) from file."
-)
-parser.add_argument(
-    "--args",
-    help="Load instruction arguments (pre-applying code) from string."
-)
-parser.add_argument(
-    "--arrange",
-    choices=["f", "s", "i", "1", "2"],
-    default="f",
-    help=
-    """Output page arrangement for double-sided output.
-    'f'(default): split front and back to 2 files.
-    's': sequential, first front, then back.
-    'i': interlaced, take one page of front, then one of back.
-    '1': front only.
-    '2': back only.
-    """
-)
-parser.add_argument(
-    "--arrange-flip",
-    choices=["n", "x", "y", "xy"],
-    default="x",
-    help="Page flip direction for back side.('n' stands for no flip, default 'x')"
-)
+@attr.s
+class PdfVarPageSizePageManager(PaperCuttingPageManager):
+    page_sizes = attr.ib(kw_only=True)
 
-args = parser.parse_args()
-
-back_mirror_x = args.arrange_flip in ("x", "xy")
-back_mirror_y = args.arrange_flip in ("y", "xy")
-
+    def get_page_dim(self):
+        return self.page_sizes[self.page_index]
 
 def file_name_suffix(file_name, suffix):
     f, e = os.path.splitext file_name
@@ -72,14 +31,14 @@ mm_to_pdf_unit = 1 / 25.4 * 72
 page_to_pdf_unit_dim = -> _.mediabox |> list |> .[2:4] |> map$(float) |> tuple |*> Vector2D
 page_to_mm_dim = page_to_pdf_unit_dim ..> (*)$(pdf_unit_to_mm)
 
-def add_thumbnail(from_page, dest_page, region, back_mirror_x=False, back_mirror_y=False):
+def add_thumbnail(dest_pdf, from_page, dest_page, region, back_mirror_x=False, back_mirror_y=False):
     #print(region.paper.meta["index"] + original_page_amount, page_index)
     formx = from_page.as_form_xobject(True)
     formx_placed_name = dest_page.add_resource(formx, Name.XObject)
     formx = dest_page.calc_form_xobject_placement(formx, formx_placed_name, Rectangle(0, 0, 300, 300), allow_shrink=True, allow_expand=True)
     #print(formx)
     commands = []
-    for operands, operator in pikepdf.parse_content_stream(pdf.make_stream(formx)):
+    for operands, operator in pikepdf.parse_content_stream(dest_pdf.make_stream(formx)):
         commands.append([operands, operator])
     #print(Affine.from_scale(Vector2D(page_w, page_h)).inverse() * region.affine * mm_to_pdf_unit)
     region_affine = region.affine
@@ -92,133 +51,165 @@ def add_thumbnail(from_page, dest_page, region, back_mirror_x=False, back_mirror
     #print(new_content_stream)
     dest_page.contents_add(new_content_stream)
 
-pdf_input_file = args.input_file
-if pdf_input_file.lower() == "stdin:":
-    pdf_input_file = BytesIO()
-    shutil.copyfileobj(sys.stdin.buffer, pdf_input_file)
-pdf = Pdf.open(pdf_input_file)
-page_sizes = pdf.pages |> map$(page_to_mm_dim) |> list
-#print(page_w, page_h)
-original_page_amount = len(pdf.pages)
+def main(args, bio_dict):
+    parser = argparse.ArgumentParser(description="Silver booklet command line interface.")
+    parser.add_argument("input_file", help="Source pdf file to be processed.")
+    parser.add_argument(
+        "-o", "--output",
+        help="Output file name. If page arrangement is set to 'file', then suffix '_front' and '_back' will be added."
+    )
+    parser.add_argument(
+        "-p", "--preset",
+        help="Get instruction sequence from a preset file."
+    )
+    parser.add_argument(
+        "-c", "--code",
+        help="Get instruction sequence from command line argument. Takes precedence over '--preset'."
+    )
+    parser.add_argument(
+        "--arg-preset",
+        help="Load instruction arguments (pre-applying code) from file."
+    )
+    parser.add_argument(
+        "--args",
+        help="Load instruction arguments (pre-applying code) from string."
+    )
+    parser.add_argument(
+        "--arrange",
+        choices=["f", "s", "i", "1", "2"],
+        default="f",
+        help=
+        """Output page arrangement for double-sided output.
+        'f'(default): split front and back to 2 files.
+        's': sequential, first front, then back.
+        'i': interlaced, take one page of front, then one of back.
+        '1': front only.
+        '2': back only.
+        """
+    )
+    parser.add_argument(
+        "--arrange-flip",
+        choices=["n", "x", "y", "xy"],
+        default="x",
+        help="Page flip direction for back side.('n' stands for no flip, default 'x')"
+    )
 
-refine_file = -> _ |> open$(?, encoding="utf-8") |> .read() |> re.sub$(r"#.*$", "", flags=re.M) |> re.split$(r" |\n") |> map$(.strip()) |> filter$(-> len(_) != 0) |> list
-pre_code = (args.args |?> re.split$(r" |\n")) ?? (args.arg_preset |?> refine_file)
-code = (args.code |?> re.split$(r" |\n")) ?? (args.preset |?> refine_file)
+    args = parser.parse_args(args)
 
-pre_code ??= []
-if code is None:
-    raise ValueError("no code available, check if -p or -c is preset")
+    back_mirror_x = args.arrange_flip in ("x", "xy")
+    back_mirror_y = args.arrange_flip in ("y", "xy")
 
-@attr.s
-class PdfVarPageSizePageManager(PaperCuttingPageManager):
-    page_sizes = attr.ib(kw_only=True)
 
-    def get_page_dim(self):
-        return self.page_sizes[self.page_index]
+    pdf_input_file = args.input_file
+    match "io:" + name in pdf_input_file.lower(): # for batch
+        pdf_input_file = bio_dict.get(name.strip()) ?? BytesIO()
+    else: if pdf_input_file.lower() == "stdin:":
+        pdf_input_file = BytesIO()
+        shutil.copyfileobj(sys.stdin.buffer, pdf_input_file)
+    pdf = Pdf.open(pdf_input_file)
+    page_sizes = pdf.pages |> map$(page_to_mm_dim) |> list
+    #print(page_w, page_h)
+    original_page_amount = len(pdf.pages)
 
-ex = PaperCuttingProcessExecuter(
-    pre_code + code,
-    page_manager=PdfVarPageSizePageManager(original_page_amount, Vector2D(-1, -1), page_sizes=page_sizes),
-    paper_manager=PaperCuttingPaperManager(Vector2D(210, 297))
-)
-ex.execute_all(debug_output=False)
-if len ex.op_stack != 0:
-    print(f"warning: unbalanced stack operation. {ex.op_stack}")
-try:
-    paper_amount = ex.paper_manager.generated_paper |> map$(.meta ..> .["index"]) |> max
-except ValueError as e:
-    raise ValueError("no page generated by code") from e
-paper_amount += 1
-paper_dims = [None] * paper_amount
-for paper in ex.paper_manager.generated_paper:
-    paper_dims[paper.meta["index"]] = paper.intrinsic_dim
+    refine_file = -> _ |> open$(?, encoding="utf-8") |> .read() |> re.sub$(r"#.*$", "", flags=re.M) |> re.split$(r" |\n") |> map$(.strip()) |> filter$(-> len(_) != 0) |> list
+    pre_code = (args.args |?> re.split$(r" |\n")) ?? (args.arg_preset |?> refine_file)
+    code = (args.code |?> re.split$(r" |\n")) ?? (args.preset |?> refine_file)
 
-target_papers_in_pdf = {}
+    pre_code ??= []
+    if code is None:
+        raise ValueError("no code available, check if -p or -c is preset")
 
-case args.arrange:
-    match "f":
-        front_file = Pdf.open(pdf_input_file)
-        back_file = Pdf.open(pdf_input_file)
-        for paper_index, paper_dim in paper_dims |> enumerate:
-            fp, bp = [front_file, back_file] |> map$(-> _.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit))))
-            target_papers_in_pdf[paper_index] = (fp, bp)
-    match "s":
-        output_file = Pdf.open(pdf_input_file)
-        for paper_index, paper_dim in paper_dims |> enumerate: # front
-            p = output_file.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit)))
-            target_papers_in_pdf[paper_index] = (p, )
-        for paper_index, paper_dim in paper_dims |> enumerate: # back
-            p = output_file.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit)))
-            target_papers_in_pdf[paper_index] += (p, )
-    match "i":
-        output_file = Pdf.open(pdf_input_file)
-        for paper_index, paper_dim in paper_dims |> enumerate: # front
-            fp = output_file.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit)))
-            bp = output_file.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit)))
-            target_papers_in_pdf[paper_index] = (fp, bp)
-    match ("1" | "2") as a:
-        output_file = Pdf.open(pdf_input_file)
-        for paper_index, paper_dim in paper_dims |> enumerate: # front
-            p = output_file.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit)))
-            target_papers_in_pdf[paper_index] = (p, None) if a == "1" else (None, p)
-for print_index, region in ex.page_manager.prints.items():
-    is_back = not region.isfront
-    if print_index < original_page_amount:
-        try:
-            target = target_papers_in_pdf[region.paper.meta["index"]][1 if is_back else 0]
-            if target is not None:
-                add_thumbnail(
-                    pdf.pages[print_index],
-                    target,
-                    region,
-                    back_mirror_x=is_back and back_mirror_x, back_mirror_y=is_back and back_mirror_y
-                )
-        except KeyError:
-            print("no more pages")
-            raise
-to_stdout = False
-if args.output?.lower() == "stdout:":
-    to_stdout = True
-    bio = BytesIO()
-case args.arrange:
-    match "s" | "i" | "1" | "2":
-        del output_file.pages[:original_page_amount]
-        if to_stdout:
-            output_file.save(bio)
-        else:
-            output_file.save(args.output ?? file_name_suffix(pdf_input_file, "_output"))
-    match "f":
-        del front_file.pages[:original_page_amount]
-        del back_file.pages[:original_page_amount]
-        if to_stdout:
-            front_file.save(bio)
-            back_file.save(bio)
-        else:
-            front_file.save((args.output |?> file_name_suffix$(?, "_front")) ?? file_name_suffix(pdf_input_file, "_front"))
-            back_file.save((args.output |?> file_name_suffix$(?, "_back")) ?? file_name_suffix(pdf_input_file, "_back"))
-if to_stdout:
-    shutil.copyfileobj(bio, sys.stdout.buffer)
-#print(ex.basket.hand.placement[0])
-#print(ex.op_stack)
-#print(ex.page_manager.prints)
+    ex = PaperCuttingProcessExecuter(
+        pre_code + code,
+        page_manager=PdfVarPageSizePageManager(original_page_amount, Vector2D(-1, -1), page_sizes=page_sizes),
+        paper_manager=PaperCuttingPaperManager(Vector2D(210, 297))
+    )
+    ex.execute_all(debug_output=False)
+    if len ex.op_stack != 0:
+        print(f"warning: unbalanced stack operation. {ex.op_stack}")
+    try:
+        paper_amount = ex.paper_manager.generated_paper |> map$(.meta ..> .["index"]) |> max
+    except ValueError as e:
+        raise ValueError("no page generated by code") from e
+    paper_amount += 1
+    paper_dims = [None] * paper_amount
+    for paper in ex.paper_manager.generated_paper:
+        paper_dims[paper.meta["index"]] = paper.intrinsic_dim
 
-"""
-def polygon_from_affine(affine):
-    v = [Vector2D(0, 0), Vector2D(1, 0), Vector2D(1, 1), Vector2D(0, 1)] |> map$(affine.apply_to)
-    return v |> map$(.tuple)
+    target_papers_in_pdf = {}
 
-import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon
+    case args.arrange:
+        match "f":
+            front_file = Pdf.open(pdf_input_file)
+            back_file = Pdf.open(pdf_input_file)
+            for paper_index, paper_dim in paper_dims |> enumerate:
+                fp, bp = [front_file, back_file] |> map$(-> _.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit))))
+                target_papers_in_pdf[paper_index] = ((fp, front_file), (bp, back_file))
+        match "s":
+            output_file = Pdf.open(pdf_input_file)
+            for paper_index, paper_dim in paper_dims |> enumerate: # front
+                p = output_file.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit)))
+                target_papers_in_pdf[paper_index] = ((p, output_file), )
+            for paper_index, paper_dim in paper_dims |> enumerate: # back
+                p = output_file.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit)))
+                target_papers_in_pdf[paper_index] += ((p, output_file), )
+        match "i":
+            output_file = Pdf.open(pdf_input_file)
+            for paper_index, paper_dim in paper_dims |> enumerate: # front
+                fp = output_file.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit)))
+                bp = output_file.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit)))
+                target_papers_in_pdf[paper_index] = ((fp, output_file), (bp, output_file))
+        match ("1" | "2") as a:
+            output_file = Pdf.open(pdf_input_file)
+            for paper_index, paper_dim in paper_dims |> enumerate: # front
+                p = output_file.add_blank_page(page_size=paper_dim.tuple |> map$((*)$(mm_to_pdf_unit)))
+                target_papers_in_pdf[paper_index] = ((p, output_file), None) if a == "1" else (None, (p, output_file))
+    for print_index, region in ex.page_manager.prints.items():
+        is_back = not region.isfront
+        if print_index < original_page_amount:
+            try:
+                target, dest_pdf = target_papers_in_pdf[region.paper.meta["index"]][1 if is_back else 0]
+                if target is not None:
+                    add_thumbnail(
+                        dest_pdf,
+                        pdf.pages[print_index],
+                        target,
+                        region,
+                        back_mirror_x=is_back and back_mirror_x, back_mirror_y=is_back and back_mirror_y
+                    )
+            except KeyError:
+                print("no more pages")
+                raise
+    to_stdout = False
+    to_io = False
+    if args.output?.lower() == "stdout:":
+        to_stdout = True
+        to_io = True
+        bio = BytesIO()
+    else: match "io:" + name in args.output?.lower():
+        to_io = True
+        bio_dict[name.strip()] = bio = bio_dict.get(name.strip()) ?? BytesIO()
+    case args.arrange:
+        match "s" | "i" | "1" | "2":
+            del output_file.pages[:original_page_amount]
+            if to_io:
+                output_file.save(bio)
+            else:
+                output_file.save(args.output ?? file_name_suffix(pdf_input_file, "_output"))
+        match "f":
+            del front_file.pages[:original_page_amount]
+            del back_file.pages[:original_page_amount]
+            if to_io:
+                front_file.save(bio)
+                back_file.save(bio)
+            else:
+                front_file.save((args.output |?> file_name_suffix$(?, "_front")) ?? file_name_suffix(pdf_input_file, "_front"))
+                back_file.save((args.output |?> file_name_suffix$(?, "_back")) ?? file_name_suffix(pdf_input_file, "_back"))
+    if to_stdout:
+        shutil.copyfileobj(bio, sys.stdout.buffer)
+    #print(ex.basket.hand.placement[0])
+    #print(ex.op_stack)
+    #print(ex.page_manager.prints)
 
-#define Matplotlib figure and axis
-fig, ax = plt.subplots()
-
-ax.add_patch(Polygon(polygon_from_affine(ex.basket.hand.placement[0].front.placement_affine), fill=False, edgecolor="pink"))
-ax.add_patch(Polygon(polygon_from_affine(ex.page_manager.print_affine), fill=False, edgecolor="blue"))
-ax.add_patch(Polygon(polygon_from_affine(ex.page_manager.prints[0].affine), fill=False, edgecolor="orange"))
-
-ax.set_aspect('equal', 'box')
-ax.set(xlim=(-0, 600), ylim=(-300, 300))
-#display plot
-plt.show()
-"""
+if __name__ == "__main__":
+    main(None, {})

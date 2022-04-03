@@ -1,0 +1,2 @@
+test.pdf -p quick/cut_fold.txt --arg-preset quick/cut_fold_demo_arg.txt --arrange i -o io:a
+io:a -p quick/cut_fold.txt --arg-preset quick/cut_fold_demo_arg.txt --arrange i -o res.pdf
